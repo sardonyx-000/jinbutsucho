@@ -1,4 +1,4 @@
-const CACHE='jinbutsucho-pwa-stable-v10-reading-20261116';
+const CACHE='jinbutsucho-pwa-v169-nav-20261116';
 const ASSETS=['./','./index.html','./summon.html','./manifest.webmanifest','./icon-192.png','./icon-512.png'];
 self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(async c=>{for(const asset of ASSETS){try{await c.add(asset)}catch(err){console.warn('オフライン保存をスキップ:',asset,err)}}}).then(()=>self.skipWaiting())));
 self.addEventListener('activate',e=>e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('jinbutsucho-')&&k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim())));
