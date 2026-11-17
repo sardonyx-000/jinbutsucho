@@ -166,12 +166,14 @@ let saving=false;
 async function save(){if(saving)return false;saving=true;const blocker=document.createElement('div');blocker.style.cssText='position:fixed;inset:0;z-index:99999;background:#0007;display:grid;place-items:center;color:white';blocker.textContent='保存中…';document.body.append(blocker);try{await CharacterStore.write(chars);return true}catch(e){alert('保存できませんでした。端末の空き容量をご確認ください。');return false}finally{saving=false;blocker.remove()}}
 function route(v){view=v;render();window.scrollTo(0,0)}
 async function setProfileInUse(value,input){const c=chars.find(x=>x.id===selected);if(!c)return;const old=c.inUse;c.inUse=value;if(!(await save())){c.inUse=old;input.checked=!!old;return;}detailPage()}
-function openChar(id){gachaReturnCharacterId=null;selected=id;tab='profile';showInitialSkills=false;viewGalleryIndex=0;route('detail')}
+function openChar(id){searchSummonPool=null;gachaReturnCharacterId=null;selected=id;tab='profile';showInitialSkills=false;viewGalleryIndex=0;route('detail')}
 // A fresh iframe for each session prevents the editor/test lifecycle from
 // leaving a stale frame or touch layer above the archive's buttons.
 let summonSession=0;
 let gachaReturnCharacterId=null;
-function openSummon(mode="play"){
+let searchSummonPool=null;
+function openSummon(mode="play",fromSearch=false){
+ if(!fromSearch)searchSummonPool=null;
  const c=chars.find(x=>x.id===selected);
  if(!c){alert('探索者が見つかりません');return}
  const overlay=document.getElementById('summonIntegration');
@@ -187,13 +189,16 @@ function openSummon(mode="play"){
  summonSession++;
  overlay.classList.remove('hidden');
  document.body.style.overflow='hidden';
- frame.src='./summon.html?id='+encodeURIComponent(c.id)+'&portrait='+idx+'&mode='+encodeURIComponent(mode)+'&session='+summonSession+'&build=gacha-return-v3';
+ frame.src='./summon.html?id='+encodeURIComponent(c.id)+'&portrait='+idx+'&mode='+encodeURIComponent(mode)+'&session='+summonSession+'&build=gacha-replay-v6'+(fromSearch?'&searchGacha=1':'');
 }
 window.addEventListener('message',e=>{
  const frame=document.getElementById('summonFrame');
- if(e.source===frame?.contentWindow&&e.data?.type==='jinbutsucho-close-summon')closeSummon();
+ if(e.source!==frame?.contentWindow)return;
+ if(e.data?.type==='jinbutsucho-close-summon')closeSummon();
+ if(e.data?.type==='jinbutsucho-redraw-search'&&searchSummonPool)randomSummonFromSearch(true);
 });
 function closeSummon(){
+ searchSummonPool=null;
  const overlay=document.getElementById('summonIntegration');
  // Hide synchronously, before tearing down the nested editor/ritual frames.
  overlay.classList.add('hidden');
@@ -465,8 +470,9 @@ function skillPickerRows(filtered){return filtered.map(n=>`<div class="skill-pic
 function renderSkillPicker(keepFocus=false){const host=document.getElementById('skillPickerHost');if(!host||skillPickerIndex===null)return;const all=orderedSkillNames();const filtered=all.filter(n=>n.toLocaleLowerCase('ja').includes(skillPickerQuery.toLocaleLowerCase('ja')));host.innerHTML=`<div class="skill-overlay" onclick="if(event.target===this)closeSkillPicker()"><div class="skill-dialog" role="dialog" aria-modal="true" aria-label="技能を選ぶ"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px"><h2 style="margin:0">技能を選ぶ</h2><button class="btn" onclick="closeSkillPicker()">閉じる ×</button></div><p class="small">★ お気に入りは先頭へ。↑↓で表示順を変更できます。</p><input id="skillPickerSearch" class="skill-query" placeholder="技能名を入力して検索（例：心理）" value="${esc(skillPickerQuery)}" oninput="setSkillPickerQuery(this.value)"><div id="skillPickerList" class="skill-picker-list">${skillPickerRows(filtered)}</div><p class="small">表示順はこのブラウザに保存されます。検索結果や技能値は変更されません。</p></div></div>`;if(keepFocus){const input=document.getElementById('skillPickerSearch');input?.focus();input?.setSelectionRange(input.value.length,input.value.length)}}
 
 function matchingSearchCharacters(){return chars.filter(c=>{if(hideLost&&isLost(c))return false;if(jobFilter&&c.job!==jobFilter)return false;if(tagFilter&&!getTags(c).includes(tagFilter))return false;let checks=conditions.map(k=>{const data=c.skills?.[k.skill];if(!data)return false;const val=Number(data.value);if(!Number.isFinite(val)||val<k.min)return false;if(k.aboveBase){const base=Number(data.base);return Number.isFinite(base)&&val>base;}return true;});return conditionMode==='and'?checks.every(Boolean):checks.some(Boolean)});}
-function randomSummonFromSearch(){
- const candidates=matchingSearchCharacters();
+function randomSummonFromSearch(replay=false){
+ if(!replay)searchSummonPool=matchingSearchCharacters().map(c=>c.id);
+ const candidates=(searchSummonPool||[]).map(id=>chars.find(c=>c.id===id)).filter(Boolean);
  if(!candidates.length){alert('検索条件に一致する探索者がいません。');return;}
  // Use unbiased browser random when available; fallback for older browsers.
  let n;
@@ -481,7 +487,7 @@ function randomSummonFromSearch(){
  // Prepare the selected investigator's detail page behind the summon overlay.
  // Closing the summon will therefore return here, not to the search results.
  route('detail');
- openSummon('play');
+ openSummon('play',true);
 }
 function drawResults(){let arr=matchingSearchCharacters();let first=conditions[0]?.skill;arr.sort((a,b)=>advancedSort==='name'?a.name.localeCompare(b.name,'ja'):advancedSort==='job'?(a.job||'').localeCompare(b.job||'','ja')||a.name.localeCompare(b.name,'ja'):(advancedSort==='skill-asc'?1:-1)*((Number(a.skills?.[first]?.value)||0)-(Number(b.skills?.[first]?.value)||0)));document.getElementById('results').innerHTML=`<div class="small">検索結果 ${arr.length} / ${chars.length} 人</div><div class="panel" style="margin-top:12px"><h2 style="margin-top:0">✦ 条件からランダム召喚</h2><p class="small">現在の検索結果 ${arr.length} 人から、1人を同じ確率で選び、いつもの召喚演出で登場させます。</p><button class="btn primary" style="width:100%;padding:15px" ${arr.length?'':'disabled'} onclick="randomSummonFromSearch()">✦ ${arr.length}人からガチャを引く</button>${arr.length?'':'<p class="small">条件に一致する探索者がいないため、召喚できません。</p>'}</div><div class="panel">${arr.map((c,i)=>`<div class="rank" onclick="openChar(${JSON.stringify(c.id).replace(/"/g,'&quot;')})"><div class="num">${i+1}</div><div class="who"><b>${esc(c.name)}</b> ${isLost(c)?'<span class="lost-ribbon">LOST</span>':''}<div class="small">${esc(c.job||'職業未設定')}　${getTags(c).map(t=>`<span class="pill">${esc(t)}</span>`).join(' ')}</div><div class="small">${conditions.map(k=>`${esc(k.skill)} ${esc(c.skills?.[k.skill]?.value??'—')}%${k.aboveBase?'（初期値超過）':''}`).join(' / ')}</div></div></div>`).join('')||'<div class="empty">条件に一致する探索者はいません。</div>'}</div>`}
 function newCharacter(){window.pendingImage=null;editId='__new__';route('edit')}
